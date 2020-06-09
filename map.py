@@ -51,12 +51,78 @@ class GaussianMap:
 			with self._lock:
 				img = self.frame
 			if (img is not None):
-				#cv2.imshow("GoPto OpenCV", img)
-				#cv2.waitKey(1)
-				continue
+				detect_spheres(img)
 			
 		cap.release()
 		cv2.destroyAllWindows()
+		
+	def extract_position(maskr, image):
+		output = []
+
+		# get contours
+		contours, hierarchy = cv2.findContours(maskr, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+		contours = sorted(contours, key=cv2.contourArea, reverse=True)
+		for i in range(min(len(contours), 2)):
+			cv2.drawContours(image, contours, i, (0, 255, 0), -1)
+
+		perimeters = []
+		areas = []
+		circularities = []
+		for con in contours:
+			M = cv2.moments(con)
+			cX = int(M["m10"] / M["m00"])
+			cY = int(M["m01"] / M["m00"])
+			perimeter = cv2.arcLength(con, True)
+			area = cv2.contourArea(con)
+			if (perimeter == 0):
+				return (perimeters, areas, circularities, image)
+			circularity = 4*math.pi*(area/(perimeter*perimeter))
+			perimeters.append(perimeter)
+			areas.append(area)
+			circularities.append(circularity)
+
+		return (perimeters, areas, circularities, image)
+
+	def detect_spheres(I):
+		# Format the image
+		image = cv2.cvtColor(I, cv2.COLOR_RGB2BGR)
+		I = cv2.cvtColor(I, cv2.COLOR_RGB2BGR)
+		hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+		# Hue thresholds
+		lower_orange = np.array([0, 150, 150])
+		upper_orange = np.array([25, 255, 255])
+
+		# Mask generation
+		maskr = cv2.inRange(hsv, lower_orange, upper_orange)
+		#mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+		#maskr = cv2.add(mask1, mask2)
+
+		#maskbg = cv2.bitwise_not(cv2.inRange(hsv, lower_not_red, upper_not_red))
+		#maskr = cv2.bitwise_and(maskr, maskbg)
+
+		# Mask filtering
+		kernele = np.ones((3,3),np.uint8)
+		kernel = np.ones((2,2), np.uint8)
+		kerneld = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5, 5))
+		maskr = cv2.erode(maskr,kernel,iterations=1)
+		#maskr = cv2.dilate(maskr,kernel,iterations=2)
+		maskr = cv2.morphologyEx(maskr, cv2.MORPH_CLOSE, kerneld, iterations=1)
+		maskr = cv2.dilate(cv2.erode(maskr,kernel,iterations=1),kernele,iterations=3)
+
+		#print(image.shape)
+		#cv2.imshow('image', image)
+		result = cv2.bitwise_and(image,image,mask = maskr)
+		result = cv2.resize(result, (960, 720), interpolation=cv2.INTER_AREA)
+		image = cv2.resize(image,(960, 720), interpolation=cv2.INTER_AREA)
+		maskr = cv2.resize(maskr, (960, 720), interpolation=cv2.INTER_AREA)
+		perimeters, areas, circularities, img = extract_position(maskr, image)
+		cv2.imshow('result', result)
+		#cv2.imshow('image', image)
+		cv2.imshow('img', img)
+		cv2.waitKey(1)
+
+		return(perimeters, areas, circularities)
 		
 	def queryUltra(self):
 		while True:
