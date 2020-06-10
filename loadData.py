@@ -10,6 +10,8 @@ from goprocam import GoProCamera, constants
 
 data = pickle.load(open("map.pkl", "rb", -1))
 
+print(len(data))
+
 ultra_1 = []
 ultra_2 = []
 ultra_3 = []
