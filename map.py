@@ -19,7 +19,6 @@ class GaussianMap:
 		self.map = None
 		self.position = (None, None)
 		self.orientation = None
-		self.lastUltra = np.zeros(NUM_ULTRA)
 		self.ultraState = np.ones(NUM_ULTRA) * -1
 		self.hasUltra = np.zeros(NUM_ULTRA)
 		self.start_back = 0
@@ -33,6 +32,7 @@ class GaussianMap:
 		self.frontLeft = 0
 		self.frontRight = 0
 		self.done = 0
+		self.saveInfo = []
 		self._lock = threading.Lock()
 		'''
 		self._lock is not currently being used.  Use it as follows:
@@ -133,7 +133,6 @@ class GaussianMap:
 			with self._lock:
 				img = self.frame
 			if (img is not None):
-				print("PROCESSING THE STREAMMMMMMMMM")
 				GPIO.output(TRIG, True)
 				time.sleep(0.00001)
 				GPIO.output(TRIG, False)
@@ -203,12 +202,30 @@ class GaussianMap:
 			with self._lock:
 				self.done = 0
 				self.hasUltra = np.zeros(NUM_ULTRA)
-				print(self.ultraState)
-				print((self.back - self.start_back) * 17150)
-				print((self.left - self.start_left) * 17150)
-				print((self.right - self.start_right) * 17150)
-				print((self.frontLeft - self.start_frontLeft) * 17150)
-				print((self.frontRight - self.start_frontRight) * 17150)
+				# print(self.ultraState)
+				# print((self.back - self.start_back) * 17150)
+				# print((self.left - self.start_left) * 17150)
+				# print((self.right - self.start_right) * 17150)
+				# print((self.frontLeft - self.start_frontLeft) * 17150)
+				# print((self.frontRight - self.start_frontRight) * 17150)
+				
+				last = []
+				last.append((self.back - self.start_back) * 17150)
+				last.append((self.left - self.start_left) * 17150)
+				last.append((self.right - self.start_right) * 17150)
+				last.append((self.frontLeft - self.start_frontLeft) * 17150)
+				last.append((self.frontRight - self.start_frontRight) * 17150)
+				
+				for i in range(NUM_ULTRA):
+					if (self.ultraState[i] == -1):
+						last[i] = -1
+						
+				print(self.ultraState[1])
+				print(last[1])
+						
+				pos_x = self.position[0]
+				pos_y = self.position[1]
+				self.saveInfo.append([(pos_x, pos_y), last])
 			
 	def drive(self, drive, reverse, speed, s, steer):
 		start = time.time()
@@ -342,11 +359,9 @@ try:
 		e.submit(gMap.drive, drive, reverse, speed, s, steer)
 except (KeyboardInterrupt, SystemExit):
 	print("\nThreads are Complete")
-	'''
 	print("Saving Class Object...")
 	with open("map.pkl", "wb") as f:
-		pickle.dump(gMap.saveUltra, f, -1)
-	'''
+		pickle.dump(gMap.saveInfo, f, -1)
 	print("Cleaning up GPIO and Exiting")
 	GPIO.setwarnings(False)
 	GPIO.setmode(GPIO.BOARD)

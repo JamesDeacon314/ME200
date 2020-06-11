@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import RPi.GPIO as GPIO
+import matplotlib.pyplot as plt
 
 NUM_ULTRA = 5
 TRIG = 33
@@ -80,14 +81,37 @@ GPIO.output(TRIG, True)
 time.sleep(0.00001)
 GPIO.output(TRIG, False)
 
-while (done < NUM_ULTRA):
-	time.sleep(0.000001)
-
-print((back - start_back) * 17150)
-print((left - start_left) * 17150)
-print((right - start_right) * 17150)
-print((frontLeft - start_frontLeft) * 17150)
-print((frontRight - start_frontRight) * 17150)
+data = []
+try:
+	while True:
+		time.sleep(0.03)
+		
+		GPIO.output(TRIG, True)
+		time.sleep(0.00001)
+		GPIO.output(TRIG, False)
+		while (done < NUM_ULTRA):
+			time.sleep(0.000001)
+		done = 0
+		# print("NEW")
+		# print((back - start_back) * 17150)
+		print((left - start_left) * 17150)
+		data.append((left - start_left) * 17150)
+		# print((right - start_right) * 17150)
+		# print((frontLeft - start_frontLeft) * 17150)
+		# print((frontRight - start_frontRight) * 17150)
+except (KeyboardInterrupt, SystemExit):
+	plt.plot(data)
+	plt.show()
+	print("Cleaning up GPIO and Exiting")
+	GPIO.setwarnings(False)
+	GPIO.setmode(GPIO.BOARD)
+	GPIO.remove_event_detect(ECHOS[0])
+	GPIO.remove_event_detect(ECHOS[1])
+	GPIO.remove_event_detect(ECHOS[2])
+	GPIO.remove_event_detect(ECHOS[3])
+	GPIO.remove_event_detect(ECHOS[4])
+	GPIO.cleanup()
+	
 '''
 # Prep the sensors
 begin = time.time()
