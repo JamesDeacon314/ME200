@@ -47,15 +47,17 @@ for i in range(len(data)):
 		ultra_4.append(data[i][1][3])
 	if (u5 != -1):
 		ultra_5.append(data[i][1][4])
-		
+
+'''		
 plt.figure(0)
 plt.plot(pos_x, pos_y, label='position')
 plt.legend()
 plt.show()
+'''
 
 plt.figure(1)
-# plt.plot(ultra_1,label="Back")
-plt.plot(ultra_2,label="Left")
+plt.plot(ultra_1,label="Back")
+# plt.plot(ultra_2,label="Left")
 # plt.plot(ultra_3,label="Right")
 # plt.plot(ultra_4,label="Front Left")
 # plt.plot(ultra_5,label="Front Right")
