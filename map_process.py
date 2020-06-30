@@ -3,7 +3,7 @@ import sys
 import time
 import pickle
 import threading
-from multiprocessing import Process, Queue
+from multiprocessing import Process, Queue, Array
 import numpy as np
 import RPi.GPIO as GPIO
 import concurrent.futures as cf
@@ -13,283 +13,205 @@ NUM_ULTRA = 5
 TRIG = 33
 ECHOS = [35, 36, 37, 38, 40]
 OBJ_TO_FIND = 3
-
-class GaussianMap:
-	def __init__(self):
-		self.frame = None
-		self.map = None
-		self.position = (None, None)
-		self.orientation = None
-		self.ultraState = np.ones(NUM_ULTRA) * -1
-		self.hasUltra = np.zeros(NUM_ULTRA)
-		self.start_back = 0
-		self.start_left = 0
-		self.start_right = 0
-		self.start_frontLeft = 0
-		self.start_frontRight = 0
-		self.back = 0
-		self.left = 0
-		self.right = 0
-		self.frontLeft = 0
-		self.frontRight = 0
-		self.done = 0
-		self.saveInfo = []
-		self._lock = threading.Lock()
-		'''
-		self._lock is not currently being used.  Use it as follows:
-			with self._lock:
-				<CODE>
-		Once the with loop ends the lock is dropped
-		'''
-		
-	# TODO : Put Ultrasonic Info somewhere
-	# TODO : Use the ultrasonic info plus center position to make a map
-		# TODO : Calculat orientation as well
-	# TODO : Save Ultrasonic Info so graphs can be made
+img = None
 	
-	'''
-	def ultra_back_cb(self, channel):
-		if (GPIO.input(ECHOS[0])):
-			self.start_back = time.time()
-			self.ultraState[0] = 0
-		else:
-			self.back = time.time()
-			if (self.ultraState[0] == 0):
-				self.ultraState[0] = 1
-			else:
-				self.ultraState[0] = -1
-			if (self.hasUltra[0] == 0):
-				self.done += 1
-				self.hasUltra[0] = 1
-		
-	def ultra_left_cb(self, channel):
-		if (GPIO.input(ECHOS[1])):
-			self.start_left = time.time()
-			self.ultraState[1] = 0
-		else:
-			self.left = time.time()
-			if (self.ultraState[1] == 0):
-				self.ultraState[1] = 1
-			else:
-				self.ultraState[1] = -1
-			if (self.hasUltra[1] == 0):
-				self.done += 1
-				self.hasUltra[1] = 1
-		
-	def ultra_right_cb(self, channel):
-		if (GPIO.input(ECHOS[2])):
-			self.start_right = time.time()
-			self.ultraState[2] = 0
-		else:
-			self.right = time.time()
-			if (self.ultraState[2] == 0):
-				self.ultraState[2] = 1
-			else:
-				self.ultraState[2] = -1
-			if (self.hasUltra[2] == 0):
-				self.done += 1
-				self.hasUltra[2] = 1
-		
-	def ultra_frontLeft_cb(self, channel):
-		if (GPIO.input(ECHOS[3])):
-			self.start_frontLeft = time.time()
-			self.ultraState[3] = 0
-		else:
-			self.frontLeft = time.time()
-			if (self.ultraState[3] == 0):
-				self.ultraState[3] = 1
-			else:
-				self.ultraState[3] = -1
-			if (self.hasUltra[3] == 0):
-				self.done += 1
-				self.hasUltra[3] = 1
-		
-	def ultra_frontRight_cb(self, channel):
-		if (GPIO.input(ECHOS[4])):
-			self.start_frontRight = time.time()
-			self.ultraState[4] = 0
-		else:
-			self.frontRight = time.time()
-			if (self.ultraState[4] == 0):
-				self.ultraState[4] = 1
-			else:
-				self.ultraState[4] = -1
-			if (self.hasUltra[4] == 0):
-				self.done += 1
-				self.hasUltra[4] = 1
-	'''
-	
-	def stream(self):
-		goproCamera = GoProCamera.GoPro()
-		goproCamera.stream("udp://127.0.0.1:10000")
-		
-	def readStream(self):
-		gpCam = GoProCamera.GoPro()
-		cap = cv2.VideoCapture("udp://127.0.0.1:10000")
-		while True:
+def stream():
+	goproCamera = GoProCamera.GoPro()
+	goproCamera.stream("udp://127.0.0.1:10000")
+			
+def processStream(q, a):
+	gpCam = GoProCamera.GoPro()
+	cap = cv2.VideoCapture("udp://127.0.0.1:10000")
+	img = np.zeros((480,640,3))
+	x = 280
+	y = 280
+	while True:
+		for i in range(4):
 			ret, frame = cap.read()
-			if ret == True:
-				self.frame = frame
-				
-	def processStream(self):
-		while True:
-			with self._lock:
-				img = self.frame
-			if (img is not None):
-				self.detect_spheres(img)
 			
-		cap.release()
-		cv2.destroyAllWindows()
-		
-	def extract_position(self, maskr, image):
-		output = []
-
-		# get contours
-		contours, hierarchy = cv2.findContours(maskr, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-		contours = sorted(contours, key=cv2.contourArea, reverse=True)
-		for i in range(min(len(contours), OBJ_TO_FIND)):
-			cv2.drawContours(image, contours, i, (0, 255, 0), -1)
-
-		x = []
-		y = []
-		for i, con in enumerate(contours):
-			if (i >= OBJ_TO_FIND):
-				break
-			M = cv2.moments(con)
-			cX = int(M["m10"] / M["m00"])
-			cY = int(M["m01"] / M["m00"])
-			x.append(cX)
-			y.append(cY)
-
-		if (len(x) > 0):
-			self.position = (sum(x) / len(x), sum(y) / len(y))
-
-	def detect_spheres(self, I):
-		# Format the image
-		image = cv2.cvtColor(I, cv2.COLOR_RGB2BGR)
-		I = cv2.cvtColor(I, cv2.COLOR_RGB2BGR)
-		hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-
-		# Hue thresholds
-		lower_orange = np.array([0, 150, 150])
-		upper_orange = np.array([25, 255, 255])
-
-		# Mask generation
-		maskr = cv2.inRange(hsv, lower_orange, upper_orange)
-
-		# Mask filtering
-		kernele = np.ones((3,3),np.uint8)
-		kernel = np.ones((2,2), np.uint8)
-		kerneld = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5, 5))
-		maskr = cv2.erode(maskr,kernel,iterations=1)
-		maskr = cv2.morphologyEx(maskr, cv2.MORPH_CLOSE, kerneld, iterations=1)
-		maskr = cv2.dilate(cv2.erode(maskr,kernel,iterations=1),kernele,iterations=3)
-
-		#print(image.shape)
-		#cv2.imshow('image', image)
-		result = cv2.bitwise_and(image,image,mask = maskr)
-		#result = cv2.resize(result, (960, 720), interpolation=cv2.INTER_AREA)
-		#image = cv2.resize(image,(960, 720), interpolation=cv2.INTER_AREA)
-		#maskr = cv2.resize(maskr, (960, 720), interpolation=cv2.INTER_AREA)
-		self.extract_position(maskr, image)
-		
-	def queryUltra(self, q):
-		# GPIO.add_event_detect(ECHOS[0], GPIO.BOTH, callback=gMap.ultra_back_cb)
-		# GPIO.add_event_detect(ECHOS[1], GPIO.BOTH, callback=gMap.ultra_left_cb)
-		# GPIO.add_event_detect(ECHOS[2], GPIO.BOTH, callback=gMap.ultra_right_cb)
-		# GPIO.add_event_detect(ECHOS[3], GPIO.BOTH, callback=gMap.ultra_frontLeft_cb)
-		# GPIO.add_event_detect(ECHOS[4], GPIO.BOTH, callback=gMap.ultra_frontRight_cb)
-
-		while True:
-			distances = []
-			for i in range(NUM_ULTRA):
-				start = time.time()
-				pulse_start = start
-				
-				GPIO.output(TRIG, True)
-				time.sleep(0.00001)
-				GPIO.output(TRIG, False)
-				
-				while GPIO.input(ECHOS[i]) == 0:
-					pulse_start = time.time()
-					if pulse_start - start > 0.01:
-						break
-
-				while GPIO.input(ECHOS[i]) == 1:
-					pulse_end = time.time()
-					if pulse_end - pulse_start > 0.01:
-						break
-
-				duration = pulse_end - pulse_start
-				distance = duration * 17150
-				distances.append(distance)
-				for j  in range(NUM_ULTRA):
-					if (j != i):
-						while GPIO.input(ECHOS[j]) == 1:
-							continue
-							
-			q.put(distances)
+		if ret == True:
+			pos = detect_spheres(frame)
 			
-	def drive(self, drive, reverse, speed, s, steer):
-		start = time.time()
-		stop = False
-		while (True):
-			ch = sys.stdin.read(1)
-			if stop == True:
-				s.ChangeDutyCycle(0)
-				s.stop()
-				reverse.ChangeDutyCycle(0)
-				drive.ChangeDutyCycle(0)
-				GPIO.setup(13,GPIO.IN)
-				drive.stop()
-				reverse.stop()
-				break
-			if ch == "a":
-				with self._lock:
-					steer=min(90, steer + 5)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(steer)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(steer)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(steer)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(0)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(0)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(0)
-					print(steer)
-			elif ch == "d":
-				with self._lock:
-					steer=max(50, steer - 5)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(steer)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(steer)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(steer)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(0)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(0)
-					time.sleep(0.1)
-					s.ChangeDutyCycle(0)
-					print(steer)
-			elif ch == 'p':
-					stop = True
-			elif ch == "w":
-				print("forward")
-				reverse.ChangeDutyCycle(0)
-				drive.ChangeDutyCycle(speed)
-			elif ch == "s":
-				print("backward")
-				drive.ChangeDutyCycle(0)
-				reverse.ChangeDutyCycle(speed)
-			elif ch == "f":
-				print("stop")
-				reverse.ChangeDutyCycle(0)
-				drive.ChangeDutyCycle(0)
+			'''
+			# Hack
+			x += 1
+			pos = (x, y)
+			'''
+			
+			if (pos == (None, None)):
+				continue
+			
+			x_b = int(pos[0] - a[0] * 1.4)
+			y_b = int(pos[1])
+			
+			x_l = int(pos[0])
+			y_l = int(pos[1] - a[1] * 1.4)
+			
+			x_r = int(pos[0])
+			y_r = int(pos[1] + a[2] * 1.4)
+			
+			x_fl = int(pos[0] + a[3] * 1.4)
+			y_fl = int(pos[1])
+			
+			x_fr = int(pos[0] + a[4] * 1.4)
+			y_fr = int(pos[1])
+			
+			cv2.circle(img, (x_b, y_b), 3, (0, 255, 0), thickness=-1)
+			cv2.circle(img, (x_l, y_l), 3, (0, 255, 0), thickness=-1)
+			cv2.circle(img, (x_r, y_r), 3, (0, 255, 0), thickness=-1)
+			cv2.circle(img, (x_fl, y_fl), 3, (0, 255, 0), thickness=-1)
+			cv2.circle(img, (x_fr, y_fr), 3, (0, 255, 0), thickness=-1)
+			
+			q.put(img)
+			# (480, 640, 3) -> ~138 pixels per meter
+			# Or 1.4 pixels per cm
+		
+	cap.release()
+	cv2.destroyAllWindows()
+	
+def extract_position(maskr, image):
+	output = []
+
+	# get contours
+	contours, hierarchy = cv2.findContours(maskr, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+	contours = sorted(contours, key=cv2.contourArea, reverse=True)
+	for i in range(min(len(contours), OBJ_TO_FIND)):
+		cv2.drawContours(image, contours, i, (0, 255, 0), -1)
+
+	x = []
+	y = []
+	for i, con in enumerate(contours):
+		if (i >= OBJ_TO_FIND):
+			break
+		M = cv2.moments(con)
+		cX = int(M["m10"] / M["m00"])
+		cY = int(M["m01"] / M["m00"])
+		x.append(cX)
+		y.append(cY)
+
+	position = (None, None)
+	if (len(x) > 0):
+		position = (sum(x) / len(x), sum(y) / len(y))
+		
+	return position
+
+def detect_spheres(I):
+	# Format the image
+	image = cv2.cvtColor(I, cv2.COLOR_RGB2BGR)
+	I = cv2.cvtColor(I, cv2.COLOR_RGB2BGR)
+	hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+
+	# Hue thresholds
+	lower_orange = np.array([0, 150, 150])
+	upper_orange = np.array([25, 255, 255])
+
+	# Mask generation
+	maskr = cv2.inRange(hsv, lower_orange, upper_orange)
+
+	# Mask filtering
+	kernele = np.ones((3,3),np.uint8)
+	kernel = np.ones((2,2), np.uint8)
+	kerneld = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5, 5))
+	maskr = cv2.erode(maskr,kernel,iterations=1)
+	maskr = cv2.morphologyEx(maskr, cv2.MORPH_CLOSE, kerneld, iterations=1)
+	maskr = cv2.dilate(cv2.erode(maskr,kernel,iterations=1),kernele,iterations=3)
+
+	#print(image.shape)
+	#cv2.imshow('image', image)
+	result = cv2.bitwise_and(image,image,mask = maskr)
+	#result = cv2.resize(result, (960, 720), interpolation=cv2.INTER_AREA)
+	#image = cv2.resize(image,(960, 720), interpolation=cv2.INTER_AREA)
+	#maskr = cv2.resize(maskr, (960, 720), interpolation=cv2.INTER_AREA)
+	return extract_position(maskr, image)
+	
+def queryUltra(a):
+	while True:
+		# distances = []
+		for i in range(NUM_ULTRA):
+			start = time.time()
+			pulse_start = start
+			
+			GPIO.output(TRIG, True)
+			time.sleep(0.00001)
+			GPIO.output(TRIG, False)
+			
+			while GPIO.input(ECHOS[i]) == 0:
+				pulse_start = time.time()
+				if pulse_start - start > 0.01:
+					break
+
+			while GPIO.input(ECHOS[i]) == 1:
+				pulse_end = time.time()
+				if pulse_end - pulse_start > 0.01:
+					break
+
+			duration = pulse_end - pulse_start
+			distance = duration * 17150
+			# distances.append(distance)
+			if (distance > 0):
+				a[i] = distance
+			for j  in range(NUM_ULTRA):
+				if (j != i):
+					while GPIO.input(ECHOS[j]) == 1:
+						continue
+						
+		# q.put(distances)
+		
+def driveCmd(drive, reverse, speed, s, steer):
+	stop = False
+	ch = sys.stdin.read(1)
+	if ch == "a":
+		steer=min(90, steer + 5)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(steer)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(steer)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(steer)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(0)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(0)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(0)
+		print(steer)
+	elif ch == "d":
+		steer=max(50, steer - 5)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(steer)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(steer)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(steer)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(0)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(0)
+		time.sleep(0.1)
+		s.ChangeDutyCycle(0)
+		print(steer)
+	elif ch == 'p':
+		s.ChangeDutyCycle(0)
+		s.stop()
+		reverse.ChangeDutyCycle(0)
+		drive.ChangeDutyCycle(0)
+		GPIO.setup(13,GPIO.IN)
+		drive.stop()
+		reverse.stop()
+	elif ch == "w":
+		print("forward")
+		reverse.ChangeDutyCycle(0)
+		drive.ChangeDutyCycle(speed)
+	elif ch == "s":
+		print("backward")
+		drive.ChangeDutyCycle(0)
+		reverse.ChangeDutyCycle(speed)
+	elif ch == "f":
+		stop = True
+		reverse.ChangeDutyCycle(0)
+		drive.ChangeDutyCycle(0)
+		
+	return steer, stop
 			
 # Configure GPIO
 GPIO.setwarnings(False)
@@ -342,46 +264,41 @@ reverse = GPIO.PWM(RPWM, 1000)
 reverse.start(0)
 speed = 20
 
-# Create the class object
-gMap = GaussianMap()
-
 print("Starting Threads\n")
-workers = 2
 try:
 	q = Queue()
-	p = Process(target=gMap.queryUltra, args = (q,))
-	p.start()
-	p2 = Process(target=gMap.stream)
-	p2.start()
-	p3 = Process(target=gMap.readStream)
-	p3.start()
-	p4 = Process(target=gMap.processStream)
-	p4.start()
+	a = Array('d', range(NUM_ULTRA))
+	p_ultra = Process(target=queryUltra, args = (a, ))
+	p_ultra.start()
+	p_stream= Process(target=stream)
+	p_stream.start()
+	p_process = Process(target=processStream, args = (q, a))
+	p_process.start()
 	while True:
-		time.sleep(1)
-	'''
-	with cf.ThreadPoolExecutor(max_workers=workers) as e:
-		e.submit(gMap.stream)
-		e.submit(gMap.readStream)
-		# e.submit(gMap.processStream)
-		# e.submit(gMap.queryUltra)
-		# e.submit(gMap.drive, drive, reverse, speed, s, steer)
-	'''
+		while not q.empty():
+			img = q.get()
+		steer, stop = driveCmd(drive,reverse,speed,s,steer)
+		if stop:
+			 raise SystemExit('Driving Complete')
 except (KeyboardInterrupt, SystemExit):
 	print("\nThreads are Complete")
+	'''
 	results = []
 	while not q.empty():
 		res = q.get()
 		results.append(res)
-	print(results)
-	p.join()
-	p2.join()
-	p3.join()
-	p4.join()
+	'''
+	
+	if img is not None:
+		cv2.imshow("environment", img)
+		cv2.waitKey(0)
+		cv2.destroyAllWindows()
+
 	print("Saving Class Object...")
 	with open("map.pkl", "wb") as f:
-		pickle.dump(results, f, -1)
-		#pickle.dump(gMap.saveInfo, f, -1)
+		# pickle.dump(results, f, -1)
+		pickle.dump(img, f, -1)
+
 	print("Cleaning up GPIO and Exiting")
 	GPIO.setwarnings(False)
 	GPIO.setmode(GPIO.BOARD)
@@ -391,3 +308,7 @@ except (KeyboardInterrupt, SystemExit):
 	GPIO.remove_event_detect(ECHOS[3])
 	GPIO.remove_event_detect(ECHOS[4])
 	GPIO.cleanup()
+	
+	p_ultra.join()
+	p_stream.join()
+	p_process.join()

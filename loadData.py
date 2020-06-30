@@ -10,6 +10,12 @@ from goprocam import GoProCamera, constants
 
 data = pickle.load(open("map.pkl", "rb", -1))
 
+print(data)
+
+cv2.imshow('graph', data)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
 # pos_x = []
 # pos_y = []
 ultra_1 = []
