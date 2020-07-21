@@ -10,7 +10,27 @@ from goprocam import GoProCamera, constants
 
 data = pickle.load(open("map.pkl", "rb", -1))
 
-print(data)
+print(data.shape)
+l = []
+r = []
+for x in range(data.shape[1]):
+	top = -1
+	bottom = data.shape[0]
+	for y in range(data.shape[0]):
+		if top == -1 and y < 240:
+			if data[y,x,1] != 0:
+				top = y
+		else:
+			if data[y,x,1] != 0:
+				bottom = y
+	if top != -1:
+		l.append(240 - top)
+	if bottom != data.shape[0]:
+		r.append(bottom - 240)
+		
+print(l)
+print(r)
+		
 
 cv2.imshow('graph', data)
 cv2.waitKey(0)
